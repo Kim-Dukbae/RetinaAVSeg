@@ -15,5 +15,5 @@ U-Net(2015), SegNet(2016), DeepLab(2015 ~ 2018), Duck Net(2023)와 같이 빠르
 
 **Keywords: Semantic Segmentation, Data Augmentation, SE-Net, Retinal vessel, artery, vein**
 
-## con
+## **Conclusion**
 <img src="result/test.png" />
