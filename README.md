@@ -17,3 +17,24 @@ U-Net(2015), SegNet(2016), DeepLab(2015 ~ 2018), Duck Net(2023)와 같이 빠르
 
 ## **Conclusion**
 <img src="result/test.png" />
+
+## Data Usage Agreement / Citations
+
+The RAVIR dataset is distributed under the **Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)** License and may only be used for non-commercial purposes.
+
+Please cite the following manuscripts if you use the RAVIR dataset:
+
+1. Hatamizadeh, A., Hosseini, H., Patel, N., Choi, J., Pole, C., Hoeferlin, C., Schwartz, S., and Terzopoulos, D. (2022). "RAVIR: A Dataset and Methodology for the Semantic Segmentation and Quantitative Analysis of Retinal Arteries and Veins in Infrared Reflectance Imaging." *IEEE Journal of Biomedical and Health Informatics*.
+
+2. Hatamizadeh, A. (2020). "An Artificial Intelligence Framework for the Automated Segmentation and Quantitative Analysis of Retinal Vasculature." *University of California, Los Angeles*.
+
+### Citation Format
+
+```bibtex
+@article{hatamizadeh2022ravir,
+  title={RAVIR: A Dataset and Methodology for the Semantic Segmentation and Quantitative Analysis of Retinal Arteries and Veins in Infrared Reflectance Imaging},
+  author={Hatamizadeh, Ali and Hosseini, Hamid and Patel, Niraj and Choi, Jinseo and Pole, Cameron and Hoeferlin, Cory and Schwartz, Steven and Terzopoulos, Demetri},
+  journal={IEEE Journal of Biomedical and Health Informatics},
+  year={2022},
+  publisher={IEEE}
+}
