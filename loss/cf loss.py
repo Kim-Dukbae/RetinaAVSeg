@@ -1,61 +1,68 @@
+import torch
 import torch.nn as nn
-
-def encode_mask(ground_truth,prediction):
-    masks_pred_softmax = F.softmax(prediction,dim=1).to(device )
-    return ground_truth, masks_pred_softmax
+import torch.nn.functional as F
 
 
 class CF_Loss(nn.Module):
-    def __init__(self, img_size):
+    def __init__(self, img_size, num_classes=3):
         super(CF_Loss, self).__init__()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.num_classes = num_classes
 
-        self.device =  torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.p = torch.tensor(img_size, dtype=torch.float)
-        self.n = torch.log(self.p) / torch.log(torch.tensor([2]).to(self.device))
-        self.n = torch.floor(self.n)
-        self.sizes = 2 ** torch.arange(self.n.item(), 1, -1).to(dtype=torch.int)
-        self.CE =  nn.CrossEntropyLoss()
+        p = torch.tensor(img_size, dtype=torch.float)
+        n = torch.floor(torch.log2(p))
+        self.sizes = 2 ** torch.arange(n.item(), 1, -1, dtype=torch.int)
 
-    def get_count(self, sizes, p, masks_pred_softmax):
-        counts = torch.zeros((masks_pred_softmax.shape[0], len(sizes), 2))
-        index = 0
+        self.ce_loss = nn.CrossEntropyLoss()
 
-        for size in sizes:
+    def get_count(self, sizes, p, masks):
+        B = masks.shape[0]
+        counts = torch.zeros((B, len(sizes), 2), device=masks.device)
+
+        for idx, size in enumerate(sizes):
             stride = (size, size)
-            pad_size = torch.where((p % size) == 0, torch.tensor(0, dtype=torch.int), (size - p % size).to(dtype=torch.int))
+            pad_size = int((size - (p % size)) % size)
             pad = nn.ZeroPad2d((0, pad_size, 0, pad_size))
-            pool = nn.AvgPool2d(kernel_size=(size, size), stride=stride)
+            pooled = F.avg_pool2d(pad(masks), kernel_size=size, stride=stride)
+            pooled = pooled * ((pooled > 0) & (pooled < size * size))
 
-            S = pad(masks_pred_softmax)
-            S = pool(S)
-            S = S * ((S > 0) & (S < (size * size)))
-            counts[..., index, 0] = (S[:, 0, ...] - S[:, 1, ...]).abs().sum() / (S[:, 1, ...] > 0).sum()
-            counts[..., index, 1] = (S[:, 2, ...] - S[:, 3, ...]).abs().sum() / (S[:, 3, ...] > 0).sum()
+            vein_diff = (pooled[:, 0] - pooled[:, 1]).abs().sum(dim=(1, 2))
+            artery_diff = (pooled[:, 2] - pooled[:, 3]).abs().sum(dim=(1, 2))
+            vein_norm = (pooled[:, 1] > 0).sum(dim=(1, 2)).clamp(min=1)
+            artery_norm = (pooled[:, 3] > 0).sum(dim=(1, 2)).clamp(min=1)
 
-            index += 1
+            counts[:, idx, 0] = vein_diff / vein_norm
+            counts[:, idx, 1] = artery_diff / artery_norm
 
         return counts
 
     def forward(self, prediction, ground_truth):
-        masks_pred_softmax = F.softmax(prediction,dim=1).to(device)
-        encode_tensor = ground_truth
-        encode_tensor= encode_tensor.to(self.device)
-        masks_pred_softmax= masks_pred_softmax.to(self.device)
-        loss_CE = self.CE(prediction, ground_truth)
-        # loss_CE = self.CE(masks_pred_softmax, encode_tensor).to(self.device)
+        prediction = prediction.to(self.device)
+        ground_truth = ground_truth.to(self.device)
 
-        # Swap class 1 (artery) and class 2 (vein) for Loss_vd calculation
-        Loss_vd = (torch.abs(masks_pred_softmax[:, 2, ...].sum() - encode_tensor[:, 1, ...].sum()) +
-                   torch.abs(masks_pred_softmax[:, 1, ...].sum() - encode_tensor[:, 2, ...].sum())) / (masks_pred_softmax.shape[0] * masks_pred_softmax.shape[2] * masks_pred_softmax.shape[3])
+        # Cross-Entropy Loss
+        loss_ce = self.ce_loss(prediction, ground_truth.long())
 
-        masks_pred_softmax = masks_pred_softmax[:, 1:3, ...]
-        encode_tensor = encode_tensor[:, 1:3, ...]
-        masks_pred_softmax = torch.cat((masks_pred_softmax, encode_tensor), 1)
-        counts = self.get_count(self.sizes, self.p, masks_pred_softmax)
+        # Softmax & One-hot encoding
+        pred_soft = F.softmax(prediction, dim=1)
+        gt_onehot = F.one_hot(ground_truth.long(), num_classes=self.num_classes).permute(0, 3, 1, 2).float()
 
-        artery_ = torch.sqrt(torch.sum(self.sizes * ((counts[..., 1]) ** 2)))
-        vein_ = torch.sqrt(torch.sum(self.sizes * ((counts[..., 0]) ** 2)))
-        size_t = torch.sqrt(torch.sum(self.sizes ** 2))
-        loss_FD = (artery_ + vein_) / size_t / masks_pred_softmax.shape[0]
+        # Vascular direction loss (artery/vein swap)
+        loss_vd = (
+            torch.abs(pred_soft[:, 2].sum() - gt_onehot[:, 1].sum()) +
+            torch.abs(pred_soft[:, 1].sum() - gt_onehot[:, 2].sum())
+        ) / (prediction.shape[0] * prediction.shape[2] * prediction.shape[3])
 
-        return loss_CE, loss_FD, Loss_vd
+        # FD loss
+        pred_fd = pred_soft[:, 1:3]
+        gt_fd = gt_onehot[:, 1:3]
+        merged = torch.cat([pred_fd, gt_fd], dim=1)
+
+        counts = self.get_count(self.sizes, prediction.shape[-1], merged)
+
+        artery = torch.sqrt(torch.sum(self.sizes * counts[..., 1] ** 2, dim=1)).mean()
+        vein = torch.sqrt(torch.sum(self.sizes * counts[..., 0] ** 2, dim=1)).mean()
+        total_scale = torch.sqrt(torch.sum(self.sizes ** 2))
+        loss_fd = (artery + vein) / total_scale
+
+        return loss_ce + loss_fd + loss_vd
