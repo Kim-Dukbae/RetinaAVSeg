@@ -14,3 +14,10 @@
 | **2PFM**    | 2-Photon microscopy (rat retina)     | Microvessels              | 1024×1024 / 115          | [🔗 Figshare](https://figshare.com/articles/dataset/2PFM_dataset_from_MaskVSC/28203014) | ★★★★★ |
 | **RAVIR**   | Vascular segmentation (rat retina)   | Artery / Vein / Others    | 768×768 / 23             | [🔗 Grand Challenge](https://ravir.grand-challenge.org/data/) | ★★★★★ |
 
+## 📊 Matrix
+| 정확도  | Dice |
+|-------------|-----------------|
+| 연속성  | cl Dice |
+| 임상적 지표  | CF-Loss |
+
+> 임상 지식을 딥러닝이 학습하도록 유도하되, 모델 내부는 여전히 representation learning의 자유를 보장해야 한다. CF-Loss가 딥러닝 모델을 학습시키는 loss function보다는, 예측 결과를 평가하는 임상적 지표로 활용하는 것이 더 적합하다.
