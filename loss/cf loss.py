@@ -2,67 +2,86 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
 class CF_Loss(nn.Module):
-    def __init__(self, img_size, num_classes=3):
+    def __init__(self, img_size,beta,alpha,gamma):
         super(CF_Loss, self).__init__()
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.num_classes = num_classes
 
-        p = torch.tensor(img_size, dtype=torch.float)
-        n = torch.floor(torch.log2(p))
-        self.sizes = 2 ** torch.arange(n.item(), 1, -1, dtype=torch.int)
+        # hyper parameters
+        self.beta = beta
+        self.alpha = alpha
+        self.gamma = gamma
 
-        self.ce_loss = nn.CrossEntropyLoss()
+        # 입력 이미지 크기를 실수형 텐서로 변환 (예: 512 → tensor(512.))
+        self.p = torch.tensor(img_size, dtype=torch.float)
+        # 이미지 크기에서 log2 기반의 최대 분할 단계 계산 (정수 스케일 수)
+        self.n = torch.floor(torch.log2(self.p))
+        # 가장 큰 박스 크기부터 작은 박스 크기까지의 2의 거듭제곱 텐서 생성 (예: [256, 128, ..., 4])
+        self.sizes = 2**torch.arange(self.n.item(), 1, -1).to(dtype=torch.int)
 
-    def get_count(self, sizes, p, masks):
-        B = masks.shape[0]
-        counts = torch.zeros((B, len(sizes), 2), device=masks.device)
+        # Entropy Loss 계산
+        self.CE = nn.CrossEntropyLoss()
+    
+    def label_to_onehot(self, pred, ture):
+        # label encoding -> one-hot encoding 변환
+        # class 0: background, 1: artery, 2: vein
+        encode_tensor  = F.one_hot(ture.to(torch.int64), num_classes=3).permute(0, 3, 1, 2).contiguous() 
+        # one-hot encoding을 cuda device로 이동하고 float32 타입으로 변환
+        encode_tensor  = encode_tensor .to(device=torch.device('cuda'), dtype=torch.float32)
+        # 예측값에 softmax 적용.
+        pred_softmax = F.softmax(pred,dim=1)
+        return pred_softmax, encode_tensor
 
-        for idx, size in enumerate(sizes):
-            stride = (size, size)
-            pad_size = int((size - (p % size)) % size)
-            pad = nn.ZeroPad2d((0, pad_size, 0, pad_size))
-            pooled = F.avg_pool2d(pad(masks), kernel_size=size, stride=stride)
-            pooled = pooled * ((pooled > 0) & (pooled < size * size))
+    def get_count(self, sizes, p, pred, true):
+        # Batch size, box 수, 2(artery and vein의 저장값)
+        counts = torch.zeros((pred.shape[0], len(sizes), 2))
 
-            vein_diff = (pooled[:, 0] - pooled[:, 1]).abs().sum(dim=(1, 2))
-            artery_diff = (pooled[:, 2] - pooled[:, 3]).abs().sum(dim=(1, 2))
-            vein_norm = (pooled[:, 1] > 0).sum(dim=(1, 2)).clamp(min=1)
-            artery_norm = (pooled[:, 3] > 0).sum(dim=(1, 2)).clamp(min=1)
+        idx = 0 # index 초기화
+        # sizes로부터 sequence 순회
+        for size in sizes:
+            stride = (size, size) # 게산할 box 크기
+            pad_size = torch.where(
+                (p % size) == 0, # 이미지 크기 p가 박스 크기 size로 나누어떨어지면 
+                torch.tensor(0, dtype=torch.int), # 패딩은 0,
+                (size - p % size).int() # 그렇지 않으면 박스 크기에 맞게 패딩 추가
+            )
 
-            counts[:, idx, 0] = vein_diff / vein_norm
-            counts[:, idx, 1] = artery_diff / artery_norm
+            # 오른쪽과 아래쪽에만 zero-padding 적용
+            pad = nn.ZeroPad2d((0,pad_size, 0, pad_size))
+            # 박스 단위의 요약된 값 하나(평균값)
+            pool = nn.AvgPool2d(kernel_size = (size, size), stride = stride)
+
+            # padding -> average pooling -> 2차원 값.
+            s_pred = pool(pad(pred)) 
+            s_true = pool(pad(true)) 
+            # 유효한 박스만 선택하기 위한 
+            s_pred = s_pred*((s_pred> 0) & (s_pred < (size*size)))
+            s_true = s_true*((s_true> 0) & (s_true < (size*size)))
+
+            eps = 1e-6  # 작은 값 추가로 ZeroDivision 방지
+            counts[..., idx, 0] = (s_pred[:, 0, ...] - s_true[:, 0, ...]).abs().sum() / ((s_true[:, 0, ...] > 0).sum() + eps)
+            counts[..., idx, 1] = (s_pred[:, 1, ...] - s_true[:, 1, ...]).abs().sum() / ((s_true[:, 1, ...] > 0).sum() + eps)
+    
+            idx += 1
 
         return counts
+    
+    def forward(self, pred, true):
+        # cross entropy loss 계산
+        loss_CE = self.CE(pred, true)
+        
+        # label encoding -> one-hot으로 변경 
+        encode_tensor, pred_ = self.label_to_onehot(pred, true)
+        # vessel 밀도 계산
+        area = pred_.shape[0] * pred_.shape[2] * pred_.shape[3]
+        diff_artery = (pred_[:, 1, ...] - encode_tensor[:, 1, ...]).abs().sum()
+        diff_vein   = (pred_[:, 2, ...] - encode_tensor[:, 2, ...]).abs().sum()
+        Loss_vd = (diff_artery + diff_vein) / area
 
-    def forward(self, prediction, ground_truth):
-        prediction = prediction.to(self.device)
-        ground_truth = ground_truth.to(self.device)
-
-        # Cross-Entropy Loss
-        loss_ce = self.ce_loss(prediction, ground_truth.long())
-
-        # Softmax & One-hot encoding
-        pred_soft = F.softmax(prediction, dim=1)
-        gt_onehot = F.one_hot(ground_truth.long(), num_classes=self.num_classes).permute(0, 3, 1, 2).float()
-
-        # Vascular direction loss (artery/vein swap)
-        loss_vd = (
-            torch.abs(pred_soft[:, 2].sum() - gt_onehot[:, 1].sum()) +
-            torch.abs(pred_soft[:, 1].sum() - gt_onehot[:, 2].sum())
-        ) / (prediction.shape[0] * prediction.shape[2] * prediction.shape[3])
-
-        # FD loss
-        pred_fd = pred_soft[:, 1:3]
-        gt_fd = gt_onehot[:, 1:3]
-        merged = torch.cat([pred_fd, gt_fd], dim=1)
-
-        counts = self.get_count(self.sizes, prediction.shape[-1], merged)
-
-        artery = torch.sqrt(torch.sum(self.sizes * counts[..., 1] ** 2, dim=1)).mean()
-        vein = torch.sqrt(torch.sum(self.sizes * counts[..., 0] ** 2, dim=1)).mean()
-        total_scale = torch.sqrt(torch.sum(self.sizes ** 2))
-        loss_fd = (artery + vein) / total_scale
-
-        return loss_ce + loss_fd + loss_vd
+        # 프렉탈 계산
+        counts = self.get_count(self.sizes, self.p, pred_, true)
+        artery_ = torch.sqrt(torch.sum(self.sizes*((counts[...,0])**2)))
+        vein_ = torch.sqrt(torch.sum(self.sizes*((counts[...,1])**2)))
+        size_t = torch.sqrt(torch.sum(self.sizes**2))
+        loss_FD = (artery_+vein_)/size_t/pred_.shape[0]
+        
+        return self.beta*loss_CE + self.alpha*loss_FD + self.gamma*Loss_vd
