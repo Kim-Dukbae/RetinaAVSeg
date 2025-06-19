@@ -6,7 +6,7 @@ class CF_Loss(nn.Module):
     def __init__(self, img_size,beta,alpha,gamma):
         super(CF_Loss, self).__init__()
         '''
-        reach paper: https://discovery.ucl.ac.uk/id/eprint/10188133/1/CF-Loss-accepted.pdf
+        research paper: https://discovery.ucl.ac.uk/id/eprint/10188133/1/CF-Loss-accepted.pdf
         git hub : https://github.com/rmaphoh/feature-loss/blob/main/scripts/loss.py
         [KO]  
         이 코드는 Yukun Zhou 외 연구진의 "CF-Loss: Clinically-relevant feature optimised loss function..." (MedIA, 2024) 논문 구현을 기반으로 수정되었습니다.  
