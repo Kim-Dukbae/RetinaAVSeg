@@ -3,7 +3,7 @@
 | No. | Loss Function |
 |-----|---------------|
 |  1  | [CF Loss](#cf-loss) |
-|  2  | [CL Loss](#cl-loss) |
+|  2  | [CL Dice](#cl-dice) |
 
 ---
 
@@ -27,6 +27,8 @@
 
 ---
 
-## CL Loss
+## CL Dice
 
-<!-- 작성 예정 -->
+- 📄 Research Paper:[clDice -- A Novel Topology-Preserving Loss Function for Tubular Structure Segmentation](https://arxiv.org/pdf/2003.07311)
+- 💻 GitHub Source: [jocpae/clDice](https://github.com/jocpae/clDice)
+
