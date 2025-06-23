@@ -98,7 +98,7 @@ class CF_Loss(nn.Module):
         Loss_vd = (diff_artery + diff_vein) / area
 
         # 프렉탈 계산
-        counts = self.get_count(self.sizes, self.p, pred_, true)
+        counts = self.get_count(self.sizes, self.p, pred_, encode_tensor)
         artery_ = torch.sqrt(torch.sum(self.sizes*((counts[...,0])**2)))
         vein_ = torch.sqrt(torch.sum(self.sizes*((counts[...,1])**2)))
         size_t = torch.sqrt(torch.sum(self.sizes**2))
